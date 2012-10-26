@@ -4,7 +4,6 @@
 #include <owl/world_model_protocol.hpp>
 #include <owl/grail_types.hpp>
 #include <owl/simple_sockets.hpp>
-#include <owl/grailV3_solver_client.hpp>
 #include <owl/client_world_connection.hpp>
 #include <owl/netbuffer.hpp>
 #include <owl/sensor_aggregator_protocol.hpp>
