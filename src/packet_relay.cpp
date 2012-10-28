@@ -1,12 +1,34 @@
+/*
+ * Copyright (c) 2012 Bernhard Firner and Rutgers University
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ * or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
+
 #include <string>
 #include <vector>
 
-#include <owl/world_model_protocol.hpp>
 #include <owl/grail_types.hpp>
 #include <owl/simple_sockets.hpp>
 #include <owl/client_world_connection.hpp>
+#include <owl/solver_aggregator_connection.hpp>
 #include <owl/netbuffer.hpp>
+#include <owl/sample_data.hpp>
 #include <owl/sensor_aggregator_protocol.hpp>
+#include <owl/solver_aggregator_connection.hpp>
 #include <owl/aggregator_solver_protocol.hpp>
 #include <thread>
 #include <mutex>
@@ -117,7 +139,7 @@ int main(int ac, char** arg_vector) {
   * Use a callback to interpret each relay packet into the packets that
   * are being repeated and send those to the aggregator.
   *****************************************************************************/
-  std::vector<NetTarget> servers{NetTarget{server_ip, server_port}};
+  std::vector<SolverAggregator::NetTarget> servers{SolverAggregator::NetTarget{server_ip, server_port}};
   auto packet_callback = [&](SampleData& s) {
     bool is_relay = false;
     {
@@ -169,9 +191,12 @@ int main(int ac, char** arg_vector) {
           size_t rss_index = data.size() - 2;
           sd.rss = ( (data[rss_index]) >= 128 ? (signed int)(data[rss_index]-256)/2.0 : (data[rss_index])/2.0) - RSSI_OFFSET;
           sd.valid = true;
-          //Send the interpreted sample back into the aggregator
-          agg.send(sensor_aggregator::makeSampleMsg(sd));
-          //std::cerr<<"Sending sample from id "<<sd.tx_id<<" with rss "<<sd.rss<<" from relay "<<sd.rx_id<<" with "<<sd.sense_data.size()<<" bytes of sensed data\n";
+	  //TODO FIXME Quick fix to stop relayed packets from being relayed
+	  if (sd.sense_data.size() < 3) {
+            //Send the interpreted sample back into the aggregator
+            agg.send(sensor_aggregator::makeSampleMsg(sd));
+            std::cerr<<"Sending sample from id "<<sd.tx_id<<" with rss "<<sd.rss<<" from relay "<<sd.rx_id<<" with "<<sd.sense_data.size()<<" bytes of sensed data\n";
+          }
         }
       }
     }
@@ -199,22 +224,20 @@ int main(int ac, char** arg_vector) {
 
     for (auto WS = ws.begin(); WS != ws.end(); ++WS) {
       for (auto attr = WS->second.begin(); attr != WS->second.end(); ++attr) {
-        if (attr->name == u"sensor.relay") {
-          //See if this is a new relay
-          //Transmitters are stored as one byte of physical layer and 16 bytes of ID
-          grail_types::transmitter relay = grail_types::readTransmitter(attr->data);
+        //See if this is a new relay
+        //Transmitters are stored as one byte of physical layer and 16 bytes of ID
+        grail_types::transmitter relay = grail_types::readTransmitter(attr->data);
 
-          //Mark that we are making a change to the aggregator rules.
-          Transmitter sensor_id;
-          sensor_id.base_id = relay.id;
-          sensor_id.mask.upper = 0xFFFFFFFFFFFFFFFF;
-          sensor_id.mask.lower = 0xFFFFFFFFFFFFFFFF;
-          rules[relay.phy].txers.push_back(sensor_id);
-          std::cerr<<"Found relay "<<(unsigned int)relay.phy<<"."<<relay.id<<'\n';
-          {
-            std::unique_lock<std::mutex> lck(relay_mutex);
-            relays.insert(relay);
-          }
+        //Mark that we are making a change to the aggregator rules.
+        Transmitter sensor_id;
+        sensor_id.base_id = relay.id;
+        sensor_id.mask.upper = 0xFFFFFFFFFFFFFFFF;
+        sensor_id.mask.lower = 0xFFFFFFFFFFFFFFFF;
+        rules[relay.phy].txers.push_back(sensor_id);
+        std::cerr<<"Found relay "<<(unsigned int)relay.phy<<"."<<relay.id<<'\n';
+        {
+          std::unique_lock<std::mutex> lck(relay_mutex);
+          relays.insert(relay);
         }
       }
     }
